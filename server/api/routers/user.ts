@@ -8,11 +8,13 @@ import {
 
 export const userRouter = createTRPCRouter({
   /**
-   * Get current user profile
+   * Get current user profile with workspaces
    */
   me: protectedProcedure.query(async ({ ctx }) => {
+    // ctx.user is already guaranteed by protectedProcedure
+    // Fetch fresh data with workspaces included
     const user = await ctx.db.user.findUnique({
-      where: { clerkId: ctx.userId },
+      where: { id: ctx.user.id },
       include: {
         workspaces: {
           include: {
@@ -22,6 +24,7 @@ export const userRouter = createTRPCRouter({
       },
     });
 
+    // This should never happen since protectedProcedure ensures user exists
     if (!user) {
       throw new TRPCError({
         code: "NOT_FOUND",
@@ -43,7 +46,7 @@ export const userRouter = createTRPCRouter({
     )
     .mutation(async ({ ctx, input }) => {
       const user = await ctx.db.user.update({
-        where: { clerkId: ctx.userId },
+        where: { id: ctx.user.id },
         data: {
           preferences: input.preferences,
         },

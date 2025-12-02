@@ -3,24 +3,36 @@ import superjson from "superjson";
 import { ZodError } from "zod";
 import { db } from "@/server/db/client";
 import { auth } from "@clerk/nextjs/server";
+import type { User } from "@prisma/client";
 
 /**
  * Context type for tRPC procedures
  */
 export interface Context {
   db: typeof db;
-  userId: string | null;
+  clerkUserId: string | null;
+  user: User | null;
 }
 
 /**
  * Create tRPC context
+ * Resolves the database User from Clerk's auth
  */
 export const createTRPCContext = async (): Promise<Context> => {
-  const { userId } = await auth();
+  const { userId: clerkUserId } = await auth();
+
+  let user: User | null = null;
+
+  if (clerkUserId) {
+    user = await db.user.findUnique({
+      where: { clerkId: clerkUserId },
+    });
+  }
 
   return {
     db,
-    userId,
+    clerkUserId,
+    user,
   };
 };
 
@@ -58,20 +70,31 @@ export const publicProcedure = t.procedure;
 
 /**
  * Middleware to enforce authentication
+ * Ensures both Clerk auth and database user exist
  */
 const enforceUserIsAuthed = t.middleware(({ ctx, next }) => {
-  if (!ctx.userId) {
-    throw new TRPCError({ code: "UNAUTHORIZED" });
+  if (!ctx.clerkUserId) {
+    throw new TRPCError({ code: "UNAUTHORIZED", message: "Not authenticated" });
   }
+
+  if (!ctx.user) {
+    throw new TRPCError({
+      code: "UNAUTHORIZED",
+      message: "User not found in database. Please sign out and sign in again.",
+    });
+  }
+
   return next({
     ctx: {
       ...ctx,
-      userId: ctx.userId,
+      clerkUserId: ctx.clerkUserId,
+      user: ctx.user,
     },
   });
 });
 
 /**
  * Protected procedure - requires authentication
+ * Provides ctx.user with the full User object
  */
 export const protectedProcedure = t.procedure.use(enforceUserIsAuthed);

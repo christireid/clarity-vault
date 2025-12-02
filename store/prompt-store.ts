@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
-import type { PromptListItem, PromptFilters, PromptSort } from "@/types";
+import type { PromptFilters, PromptSort } from "@/types";
 
 interface PromptState {
   // Selected prompt

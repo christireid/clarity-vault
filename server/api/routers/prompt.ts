@@ -1,38 +1,81 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import {
-  createTRPCRouter,
-  protectedProcedure,
-  publicProcedure,
-} from "@/server/api/trpc";
+import { createTRPCRouter, protectedProcedure } from "@/server/api/trpc";
 import { PromptCategory } from "@prisma/client";
+
+/**
+ * Regex pattern for extracting variables from prompt content
+ * Matches {{variableName}} where variableName starts with letter/underscore
+ */
+const VARIABLE_PATTERN = /\{\{([a-zA-Z_][a-zA-Z0-9_]*)\}\}/g;
+
+/**
+ * Extract unique variable names from prompt content
+ */
+function extractVariables(content: string): string[] {
+  const variables: string[] = [];
+  let match;
+  // Reset regex lastIndex to ensure fresh matching
+  VARIABLE_PATTERN.lastIndex = 0;
+  while ((match = VARIABLE_PATTERN.exec(content)) !== null) {
+    if (match[1] && !variables.includes(match[1])) {
+      variables.push(match[1]);
+    }
+  }
+  return variables;
+}
 
 // Input validation schemas
 const createPromptSchema = z.object({
-  title: z.string().min(1).max(200),
-  content: z.string().min(1),
-  description: z.string().optional(),
+  title: z.string().min(1, "Title is required").max(200),
+  content: z.string().min(1, "Content is required"),
+  description: z.string().max(1000).optional(),
   category: z.nativeEnum(PromptCategory).optional(),
-  tags: z.array(z.string()).optional(),
-  workspaceId: z.string(),
+  tags: z.array(z.string().max(50)).max(10).optional(),
+  workspaceId: z.string().min(1, "Workspace ID is required"),
 });
 
 const updatePromptSchema = z.object({
-  id: z.string(),
+  id: z.string().min(1),
   title: z.string().min(1).max(200).optional(),
-  description: z.string().optional(),
+  description: z.string().max(1000).optional(),
   category: z.nativeEnum(PromptCategory).optional(),
-  tags: z.array(z.string()).optional(),
+  tags: z.array(z.string().max(50)).max(10).optional(),
   favorite: z.boolean().optional(),
   archived: z.boolean().optional(),
 });
 
 const createVersionSchema = z.object({
-  promptId: z.string(),
+  promptId: z.string().min(1),
   content: z.string().min(1),
-  commitMessage: z.string().optional(),
-  branch: z.string().optional(),
+  commitMessage: z.string().max(500).optional(),
+  branch: z.string().max(100).optional(),
 });
+
+/**
+ * Verify user is a member of the workspace
+ */
+async function verifyWorkspaceMembership(
+  db: typeof import("@/server/db/client").db,
+  userId: string,
+  workspaceId: string
+): Promise<void> {
+  const membership = await db.workspaceMember.findUnique({
+    where: {
+      userId_workspaceId: {
+        userId,
+        workspaceId,
+      },
+    },
+  });
+
+  if (!membership) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "You do not have access to this workspace",
+    });
+  }
+}
 
 export const promptRouter = createTRPCRouter({
   /**
@@ -41,14 +84,14 @@ export const promptRouter = createTRPCRouter({
   list: protectedProcedure
     .input(
       z.object({
-        workspaceId: z.string(),
+        workspaceId: z.string().min(1),
         filter: z
           .enum(["all", "favorites", "recent", "archived"])
           .optional()
           .default("all"),
         category: z.nativeEnum(PromptCategory).optional(),
         tags: z.array(z.string()).optional(),
-        search: z.string().optional(),
+        search: z.string().max(200).optional(),
         sort: z
           .object({
             field: z.enum(["usage", "created", "updated", "title"]),
@@ -60,6 +103,9 @@ export const promptRouter = createTRPCRouter({
       })
     )
     .query(async ({ ctx, input }) => {
+      // Verify workspace access
+      await verifyWorkspaceMembership(ctx.db, ctx.user.id, input.workspaceId);
+
       const {
         workspaceId,
         filter,
@@ -149,7 +195,7 @@ export const promptRouter = createTRPCRouter({
    * Get a single prompt by ID
    */
   getById: protectedProcedure
-    .input(z.object({ id: z.string() }))
+    .input(z.object({ id: z.string().min(1) }))
     .query(async ({ ctx, input }) => {
       const prompt = await ctx.db.prompt.findUnique({
         where: { id: input.id },
@@ -180,6 +226,9 @@ export const promptRouter = createTRPCRouter({
         });
       }
 
+      // Verify workspace access
+      await verifyWorkspaceMembership(ctx.db, ctx.user.id, prompt.workspaceId);
+
       return prompt;
     }),
 
@@ -189,11 +238,26 @@ export const promptRouter = createTRPCRouter({
   getVersionHistory: protectedProcedure
     .input(
       z.object({
-        promptId: z.string(),
+        promptId: z.string().min(1),
         branch: z.string().optional(),
       })
     )
     .query(async ({ ctx, input }) => {
+      // First verify the prompt exists and user has access
+      const prompt = await ctx.db.prompt.findUnique({
+        where: { id: input.promptId },
+        select: { workspaceId: true },
+      });
+
+      if (!prompt) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Prompt not found",
+        });
+      }
+
+      await verifyWorkspaceMembership(ctx.db, ctx.user.id, prompt.workspaceId);
+
       const versions = await ctx.db.promptVersion.findMany({
         where: {
           promptId: input.promptId,
@@ -222,17 +286,11 @@ export const promptRouter = createTRPCRouter({
   create: protectedProcedure
     .input(createPromptSchema)
     .mutation(async ({ ctx, input }) => {
-      const { content, ...promptData } = input;
+      // Verify workspace access
+      await verifyWorkspaceMembership(ctx.db, ctx.user.id, input.workspaceId);
 
-      // Extract variables from content
-      const variablePattern = /\{\{([a-zA-Z_][a-zA-Z0-9_]*)\}\}/g;
-      const variables: string[] = [];
-      let match;
-      while ((match = variablePattern.exec(content)) !== null) {
-        if (!variables.includes(match[1])) {
-          variables.push(match[1]);
-        }
-      }
+      const { content, ...promptData } = input;
+      const variables = extractVariables(content);
 
       // Create prompt and initial version in a transaction
       const prompt = await ctx.db.$transaction(async (tx) => {
@@ -240,7 +298,7 @@ export const promptRouter = createTRPCRouter({
         const newPrompt = await tx.prompt.create({
           data: {
             ...promptData,
-            authorId: ctx.userId,
+            authorId: ctx.user.id,
             tags: promptData.tags ?? [],
           },
         });
@@ -252,7 +310,7 @@ export const promptRouter = createTRPCRouter({
             content,
             version: 1,
             variables: variables,
-            createdById: ctx.userId,
+            createdById: ctx.user.id,
           },
         });
 
@@ -279,6 +337,25 @@ export const promptRouter = createTRPCRouter({
     .mutation(async ({ ctx, input }) => {
       const { id, ...data } = input;
 
+      // Verify prompt exists and user has access
+      const existingPrompt = await ctx.db.prompt.findUnique({
+        where: { id },
+        select: { workspaceId: true },
+      });
+
+      if (!existingPrompt) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Prompt not found",
+        });
+      }
+
+      await verifyWorkspaceMembership(
+        ctx.db,
+        ctx.user.id,
+        existingPrompt.workspaceId
+      );
+
       const prompt = await ctx.db.prompt.update({
         where: { id },
         data,
@@ -298,29 +375,36 @@ export const promptRouter = createTRPCRouter({
     .mutation(async ({ ctx, input }) => {
       const { promptId, content, commitMessage, branch } = input;
 
-      // Get current version number
-      const latestVersion = await ctx.db.promptVersion.findFirst({
-        where: {
-          promptId,
-          branch: branch ?? null,
-        },
-        orderBy: { version: "desc" },
+      // Verify prompt exists and user has access
+      const prompt = await ctx.db.prompt.findUnique({
+        where: { id: promptId },
+        select: { workspaceId: true },
       });
 
-      const newVersionNumber = (latestVersion?.version ?? 0) + 1;
-
-      // Extract variables
-      const variablePattern = /\{\{([a-zA-Z_][a-zA-Z0-9_]*)\}\}/g;
-      const variables: string[] = [];
-      let match;
-      while ((match = variablePattern.exec(content)) !== null) {
-        if (!variables.includes(match[1])) {
-          variables.push(match[1]);
-        }
+      if (!prompt) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Prompt not found",
+        });
       }
 
-      // Create new version and update prompt
+      await verifyWorkspaceMembership(ctx.db, ctx.user.id, prompt.workspaceId);
+
+      const variables = extractVariables(content);
+
+      // Use transaction to prevent race conditions on version numbering
       const version = await ctx.db.$transaction(async (tx) => {
+        // Get current version number with lock
+        const latestVersion = await tx.promptVersion.findFirst({
+          where: {
+            promptId,
+            branch: branch ?? null,
+          },
+          orderBy: { version: "desc" },
+        });
+
+        const newVersionNumber = (latestVersion?.version ?? 0) + 1;
+
         const newVersion = await tx.promptVersion.create({
           data: {
             promptId,
@@ -330,7 +414,7 @@ export const promptRouter = createTRPCRouter({
             branch,
             parentId: latestVersion?.id,
             variables: variables,
-            createdById: ctx.userId,
+            createdById: ctx.user.id,
           },
         });
 
@@ -352,8 +436,23 @@ export const promptRouter = createTRPCRouter({
    * Delete a prompt
    */
   delete: protectedProcedure
-    .input(z.object({ id: z.string() }))
+    .input(z.object({ id: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
+      // Verify prompt exists and user has access
+      const prompt = await ctx.db.prompt.findUnique({
+        where: { id: input.id },
+        select: { workspaceId: true },
+      });
+
+      if (!prompt) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Prompt not found",
+        });
+      }
+
+      await verifyWorkspaceMembership(ctx.db, ctx.user.id, prompt.workspaceId);
+
       await ctx.db.prompt.delete({
         where: { id: input.id },
       });
@@ -365,11 +464,11 @@ export const promptRouter = createTRPCRouter({
    * Toggle favorite status
    */
   toggleFavorite: protectedProcedure
-    .input(z.object({ id: z.string() }))
+    .input(z.object({ id: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
       const prompt = await ctx.db.prompt.findUnique({
         where: { id: input.id },
-        select: { favorite: true },
+        select: { favorite: true, workspaceId: true },
       });
 
       if (!prompt) {
@@ -378,6 +477,8 @@ export const promptRouter = createTRPCRouter({
           message: "Prompt not found",
         });
       }
+
+      await verifyWorkspaceMembership(ctx.db, ctx.user.id, prompt.workspaceId);
 
       const updatedPrompt = await ctx.db.prompt.update({
         where: { id: input.id },
@@ -391,7 +492,7 @@ export const promptRouter = createTRPCRouter({
    * Duplicate a prompt
    */
   duplicate: protectedProcedure
-    .input(z.object({ id: z.string() }))
+    .input(z.object({ id: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
       const originalPrompt = await ctx.db.prompt.findUnique({
         where: { id: input.id },
@@ -407,6 +508,12 @@ export const promptRouter = createTRPCRouter({
         });
       }
 
+      await verifyWorkspaceMembership(
+        ctx.db,
+        ctx.user.id,
+        originalPrompt.workspaceId
+      );
+
       // Create duplicate
       const duplicate = await ctx.db.$transaction(async (tx) => {
         const newPrompt = await tx.prompt.create({
@@ -415,7 +522,7 @@ export const promptRouter = createTRPCRouter({
             description: originalPrompt.description,
             category: originalPrompt.category,
             tags: originalPrompt.tags,
-            authorId: ctx.userId,
+            authorId: ctx.user.id,
             workspaceId: originalPrompt.workspaceId,
           },
         });
@@ -426,7 +533,7 @@ export const promptRouter = createTRPCRouter({
             content: originalPrompt.currentVersion!.content,
             version: 1,
             variables: originalPrompt.currentVersion!.variables,
-            createdById: ctx.userId,
+            createdById: ctx.user.id,
           },
         });
 
@@ -446,14 +553,35 @@ export const promptRouter = createTRPCRouter({
    * Bulk delete prompts
    */
   bulkDelete: protectedProcedure
-    .input(z.object({ ids: z.array(z.string()) }))
+    .input(
+      z.object({
+        ids: z.array(z.string().min(1)).min(1, "At least one ID is required"),
+      })
+    )
     .mutation(async ({ ctx, input }) => {
-      await ctx.db.prompt.deleteMany({
-        where: {
-          id: { in: input.ids },
-        },
+      // Verify all prompts exist and belong to workspaces the user has access to
+      const prompts = await ctx.db.prompt.findMany({
+        where: { id: { in: input.ids } },
+        select: { id: true, workspaceId: true },
       });
 
-      return { success: true, count: input.ids.length };
+      if (prompts.length !== input.ids.length) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "One or more prompts not found",
+        });
+      }
+
+      // Verify access to all workspaces
+      const workspaceIds = [...new Set(prompts.map((p) => p.workspaceId))];
+      for (const workspaceId of workspaceIds) {
+        await verifyWorkspaceMembership(ctx.db, ctx.user.id, workspaceId);
+      }
+
+      const result = await ctx.db.prompt.deleteMany({
+        where: { id: { in: input.ids } },
+      });
+
+      return { success: true, count: result.count };
     }),
 });
