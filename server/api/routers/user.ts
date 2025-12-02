@@ -6,6 +6,28 @@ import {
   publicProcedure,
 } from "@/server/api/trpc";
 
+/**
+ * User preferences schema - explicitly define allowed preferences
+ * to prevent arbitrary data storage and potential injection attacks
+ */
+const userPreferencesSchema = z
+  .object({
+    theme: z.enum(["light", "dark", "system"]).optional(),
+    language: z.string().max(10).optional(),
+    timezone: z.string().max(50).optional(),
+    notificationsEnabled: z.boolean().optional(),
+    emailNotifications: z.boolean().optional(),
+    defaultWorkspaceId: z.string().cuid().optional(),
+    editorSettings: z
+      .object({
+        fontSize: z.number().min(8).max(32).optional(),
+        tabSize: z.number().min(2).max(8).optional(),
+        wordWrap: z.boolean().optional(),
+      })
+      .optional(),
+  })
+  .strict(); // Reject unknown properties
+
 export const userRouter = createTRPCRouter({
   /**
    * Get current user profile with workspaces
@@ -41,7 +63,7 @@ export const userRouter = createTRPCRouter({
   updatePreferences: protectedProcedure
     .input(
       z.object({
-        preferences: z.record(z.unknown()),
+        preferences: userPreferencesSchema,
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -57,6 +79,13 @@ export const userRouter = createTRPCRouter({
 
   /**
    * Sync user from Clerk (called by webhook)
+   *
+   * SECURITY NOTE: This endpoint should only be called by Clerk webhooks.
+   * In production, implement webhook signature verification using CLERK_WEBHOOK_SECRET.
+   * See: https://clerk.com/docs/integrations/webhooks
+   *
+   * TODO: Move to a dedicated webhook handler with signature verification
+   * before deploying to production.
    */
   syncFromClerk: publicProcedure
     .input(

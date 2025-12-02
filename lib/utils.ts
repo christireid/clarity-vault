@@ -57,13 +57,13 @@ export function truncate(text: string, maxLength: number): string {
 /**
  * Debounce a function
  */
-export function debounce<T extends (...args: Parameters<T>) => ReturnType<T>>(
-  func: T,
+export function debounce<TArgs extends unknown[]>(
+  func: (..._args: TArgs) => void,
   wait: number
-): (...args: Parameters<T>) => void {
+): (..._args: TArgs) => void {
   let timeoutId: ReturnType<typeof setTimeout> | null = null;
 
-  return (...args: Parameters<T>) => {
+  return (...args: TArgs) => {
     if (timeoutId) {
       clearTimeout(timeoutId);
     }

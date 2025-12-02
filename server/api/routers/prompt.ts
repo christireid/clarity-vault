@@ -1,7 +1,13 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { createTRPCRouter, protectedProcedure } from "@/server/api/trpc";
-import { PromptCategory } from "@prisma/client";
+import { PromptCategory, type Prisma } from "@prisma/client";
+
+// Type alias for Prisma transaction client
+type TxClient = Omit<
+  Prisma.TransactionClient,
+  "$connect" | "$disconnect" | "$on" | "$transaction" | "$use" | "$extends"
+>;
 
 /**
  * Regex pattern for extracting variables from prompt content
@@ -25,13 +31,29 @@ function extractVariables(content: string): string[] {
   return variables;
 }
 
+// Maximum content size (100KB - reasonable for prompt content)
+const MAX_CONTENT_SIZE = 100_000;
+
+// Tag validation: must be alphanumeric with hyphens/underscores, no empty strings
+const tagSchema = z
+  .string()
+  .min(1, "Tag cannot be empty")
+  .max(50, "Tag must be less than 50 characters")
+  .regex(
+    /^[a-zA-Z0-9][a-zA-Z0-9_-]*$/,
+    "Tags must start with alphanumeric and contain only letters, numbers, hyphens, underscores"
+  );
+
 // Input validation schemas
 const createPromptSchema = z.object({
   title: z.string().min(1, "Title is required").max(200),
-  content: z.string().min(1, "Content is required"),
+  content: z
+    .string()
+    .min(1, "Content is required")
+    .max(MAX_CONTENT_SIZE, `Content must be less than ${MAX_CONTENT_SIZE} characters`),
   description: z.string().max(1000).optional(),
   category: z.nativeEnum(PromptCategory).optional(),
-  tags: z.array(z.string().max(50)).max(10).optional(),
+  tags: z.array(tagSchema).max(10).optional(),
   workspaceId: z.string().min(1, "Workspace ID is required"),
 });
 
@@ -40,14 +62,17 @@ const updatePromptSchema = z.object({
   title: z.string().min(1).max(200).optional(),
   description: z.string().max(1000).optional(),
   category: z.nativeEnum(PromptCategory).optional(),
-  tags: z.array(z.string().max(50)).max(10).optional(),
+  tags: z.array(tagSchema).max(10).optional(),
   favorite: z.boolean().optional(),
   archived: z.boolean().optional(),
 });
 
 const createVersionSchema = z.object({
   promptId: z.string().min(1),
-  content: z.string().min(1),
+  content: z
+    .string()
+    .min(1, "Content is required")
+    .max(MAX_CONTENT_SIZE, `Content must be less than ${MAX_CONTENT_SIZE} characters`),
   commitMessage: z.string().max(500).optional(),
   branch: z.string().max(100).optional(),
 });
@@ -90,15 +115,19 @@ export const promptRouter = createTRPCRouter({
           .optional()
           .default("all"),
         category: z.nativeEnum(PromptCategory).optional(),
-        tags: z.array(z.string()).optional(),
-        search: z.string().max(200).optional(),
+        tags: z.array(z.string().min(1).max(50)).optional(),
+        search: z
+          .string()
+          .max(200)
+          .transform((s) => s?.trim())
+          .optional(),
         sort: z
           .object({
             field: z.enum(["usage", "created", "updated", "title"]),
             direction: z.enum(["asc", "desc"]),
           })
           .optional(),
-        cursor: z.string().optional(),
+        cursor: z.string().cuid().optional(),
         limit: z.number().min(1).max(100).default(20),
       })
     )
@@ -550,12 +579,15 @@ export const promptRouter = createTRPCRouter({
     }),
 
   /**
-   * Bulk delete prompts
+   * Bulk delete prompts (max 100 at a time)
    */
   bulkDelete: protectedProcedure
     .input(
       z.object({
-        ids: z.array(z.string().min(1)).min(1, "At least one ID is required"),
+        ids: z
+          .array(z.string().min(1))
+          .min(1, "At least one ID is required")
+          .max(100, "Cannot delete more than 100 prompts at once"),
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -572,8 +604,8 @@ export const promptRouter = createTRPCRouter({
         });
       }
 
-      // Verify access to all workspaces
-      const workspaceIds = [...new Set(prompts.map((p) => p.workspaceId))];
+      // Verify access to all workspaces (use Array.from for Set iteration)
+      const workspaceIds = Array.from(new Set(prompts.map((p) => p.workspaceId)));
       for (const workspaceId of workspaceIds) {
         await verifyWorkspaceMembership(ctx.db, ctx.user.id, workspaceId);
       }
