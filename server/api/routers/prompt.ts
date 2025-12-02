@@ -3,11 +3,15 @@ import { TRPCError } from "@trpc/server";
 import { createTRPCRouter, protectedProcedure } from "@/server/api/trpc";
 import { PromptCategory, type Prisma } from "@prisma/client";
 
-// Type alias for Prisma transaction client
+// Type alias for Prisma transaction client (used in $transaction callbacks)
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 type TxClient = Omit<
   Prisma.TransactionClient,
   "$connect" | "$disconnect" | "$on" | "$transaction" | "$use" | "$extends"
 >;
+
+// Recent filter: prompts updated in the last 7 days
+const RECENT_DAYS = 7;
 
 /**
  * Regex pattern for extracting variables from prompt content
@@ -154,6 +158,13 @@ export const promptRouter = createTRPCRouter({
 
       if (filter === "favorites") {
         where.favorite = true;
+      }
+
+      // "recent" filter: show prompts updated in the last N days
+      if (filter === "recent") {
+        const recentDate = new Date();
+        recentDate.setDate(recentDate.getDate() - RECENT_DAYS);
+        where.updatedAt = { gte: recentDate };
       }
 
       if (category) {
