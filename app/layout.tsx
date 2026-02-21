@@ -1,18 +1,12 @@
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
 import { ClerkProvider } from "@clerk/nextjs";
 import { Providers } from "./providers";
 import "./globals.css";
 
-const inter = Inter({
-  subsets: ["latin"],
-  variable: "--font-sans",
-});
-
 export const metadata: Metadata = {
   title: "Prompt Vault",
   description:
-    "A comprehensive prompt management and LLMOps platform for teams",
+    "A prompt management and version control platform for AI teams",
   keywords: [
     "prompt management",
     "LLM",
@@ -24,7 +18,7 @@ export const metadata: Metadata = {
   openGraph: {
     title: "Prompt Vault",
     description:
-      "A comprehensive prompt management and LLMOps platform for teams",
+      "A prompt management and version control platform for AI teams",
     type: "website",
   },
 };
@@ -37,7 +31,7 @@ export default function RootLayout({
   return (
     <ClerkProvider>
       <html lang="en" suppressHydrationWarning>
-        <body className={`${inter.variable} font-sans antialiased`}>
+        <body className="font-sans antialiased">
           <Providers>{children}</Providers>
         </body>
       </html>

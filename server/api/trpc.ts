@@ -2,7 +2,7 @@ import { initTRPC, TRPCError } from "@trpc/server";
 import superjson from "superjson";
 import { ZodError } from "zod";
 import { db } from "@/server/db/client";
-import { auth } from "@clerk/nextjs/server";
+import { auth, currentUser } from "@clerk/nextjs/server";
 import type { User } from "@prisma/client";
 
 /**
@@ -16,7 +16,8 @@ export interface Context {
 
 /**
  * Create tRPC context
- * Resolves the database User from Clerk's auth
+ * Resolves the database User from Clerk's auth.
+ * Auto-creates the user record on first sign-in.
  */
 export const createTRPCContext = async (): Promise<Context> => {
   const { userId: clerkUserId } = await auth();
@@ -27,6 +28,24 @@ export const createTRPCContext = async (): Promise<Context> => {
     user = await db.user.findUnique({
       where: { clerkId: clerkUserId },
     });
+
+    // Auto-provision user on first sign-in from Clerk
+    if (!user) {
+      const clerkUser = await currentUser();
+      if (clerkUser) {
+        user = await db.user.create({
+          data: {
+            clerkId: clerkUserId,
+            email:
+              clerkUser.emailAddresses[0]?.emailAddress ?? `${clerkUserId}@unknown`,
+            name: [clerkUser.firstName, clerkUser.lastName]
+              .filter(Boolean)
+              .join(" ") || null,
+            avatarUrl: clerkUser.imageUrl ?? null,
+          },
+        });
+      }
+    }
   }
 
   return {

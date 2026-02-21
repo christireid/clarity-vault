@@ -2,84 +2,30 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { createTRPCRouter, protectedProcedure } from "@/server/api/trpc";
 import { PromptCategory, type Prisma } from "@prisma/client";
-
-// Type alias for Prisma transaction client (used in $transaction callbacks)
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-type TxClient = Omit<
-  Prisma.TransactionClient,
-  "$connect" | "$disconnect" | "$on" | "$transaction" | "$use" | "$extends"
->;
+import {
+  createPromptSchema,
+  updatePromptSchema,
+  createVersionSchema,
+} from "@/lib/validations/prompt";
 
 // Recent filter: prompts updated in the last 7 days
 const RECENT_DAYS = 7;
 
 /**
- * Regex pattern for extracting variables from prompt content
- * Matches {{variableName}} where variableName starts with letter/underscore
- */
-const VARIABLE_PATTERN = /\{\{([a-zA-Z_][a-zA-Z0-9_]*)\}\}/g;
-
-/**
- * Extract unique variable names from prompt content
+ * Extract unique variable names from prompt content.
+ * Matches {{variableName}} where variableName starts with letter/underscore.
  */
 function extractVariables(content: string): string[] {
+  const pattern = /\{\{([a-zA-Z_][a-zA-Z0-9_]*)\}\}/g;
   const variables: string[] = [];
   let match;
-  // Reset regex lastIndex to ensure fresh matching
-  VARIABLE_PATTERN.lastIndex = 0;
-  while ((match = VARIABLE_PATTERN.exec(content)) !== null) {
+  while ((match = pattern.exec(content)) !== null) {
     if (match[1] && !variables.includes(match[1])) {
       variables.push(match[1]);
     }
   }
   return variables;
 }
-
-// Maximum content size (100KB - reasonable for prompt content)
-const MAX_CONTENT_SIZE = 100_000;
-
-// Tag validation: must be alphanumeric with hyphens/underscores, no empty strings
-const tagSchema = z
-  .string()
-  .min(1, "Tag cannot be empty")
-  .max(50, "Tag must be less than 50 characters")
-  .regex(
-    /^[a-zA-Z0-9][a-zA-Z0-9_-]*$/,
-    "Tags must start with alphanumeric and contain only letters, numbers, hyphens, underscores"
-  );
-
-// Input validation schemas
-const createPromptSchema = z.object({
-  title: z.string().min(1, "Title is required").max(200),
-  content: z
-    .string()
-    .min(1, "Content is required")
-    .max(MAX_CONTENT_SIZE, `Content must be less than ${MAX_CONTENT_SIZE} characters`),
-  description: z.string().max(1000).optional(),
-  category: z.nativeEnum(PromptCategory).optional(),
-  tags: z.array(tagSchema).max(10).optional(),
-  workspaceId: z.string().min(1, "Workspace ID is required"),
-});
-
-const updatePromptSchema = z.object({
-  id: z.string().min(1),
-  title: z.string().min(1).max(200).optional(),
-  description: z.string().max(1000).optional(),
-  category: z.nativeEnum(PromptCategory).optional(),
-  tags: z.array(tagSchema).max(10).optional(),
-  favorite: z.boolean().optional(),
-  archived: z.boolean().optional(),
-});
-
-const createVersionSchema = z.object({
-  promptId: z.string().min(1),
-  content: z
-    .string()
-    .min(1, "Content is required")
-    .max(MAX_CONTENT_SIZE, `Content must be less than ${MAX_CONTENT_SIZE} characters`),
-  commitMessage: z.string().max(500).optional(),
-  branch: z.string().max(100).optional(),
-});
 
 /**
  * Verify user is a member of the workspace
@@ -572,7 +518,7 @@ export const promptRouter = createTRPCRouter({
             promptId: newPrompt.id,
             content: originalPrompt.currentVersion!.content,
             version: 1,
-            variables: originalPrompt.currentVersion!.variables,
+            variables: originalPrompt.currentVersion!.variables as Prisma.InputJsonValue,
             createdById: ctx.user.id,
           },
         });

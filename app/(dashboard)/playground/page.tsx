@@ -1,0 +1,17 @@
+import { Play } from "lucide-react";
+
+export default function PlaygroundPage() {
+  return (
+    <div className="flex h-full items-center justify-center">
+      <div className="text-center">
+        <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-muted">
+          <Play className="h-8 w-8 text-muted-foreground" />
+        </div>
+        <h3 className="mt-4 text-lg font-medium">LLM Playground</h3>
+        <p className="mt-2 text-sm text-muted-foreground">
+          Test prompts against multiple models. Coming soon.
+        </p>
+      </div>
+    </div>
+  );
+}

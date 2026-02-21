@@ -9,10 +9,10 @@ const isPublicRoute = createRouteMatcher([
   "/api/trpc(.*)", // Allow tRPC to handle its own auth
 ]);
 
-export default clerkMiddleware(async (auth, req) => {
+export default clerkMiddleware((auth, req) => {
   // Protect all routes except public ones
   if (!isPublicRoute(req)) {
-    await auth.protect();
+    auth().protect();
   }
 });
 

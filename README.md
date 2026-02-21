@@ -1,15 +1,29 @@
 # Prompt Vault
 
-A comprehensive prompt management and LLMOps platform for teams.
+A prompt management and version control platform for AI teams.
 
-## Features
+> **Status**: Early development (alpha). Core prompt CRUD and version control are functional.
+> Many features listed in the roadmap are under development.
 
-- **Version Control**: Git-like version control for your prompts
-- **Variable System**: Smart variable placeholders with intelligent extraction
-- **LLM Playground**: Test prompts against multiple models
-- **Evaluation Pipeline**: LLM-as-judge evaluation with custom criteria
-- **Team Collaboration**: Workspaces, roles, and sharing
-- **Analytics & Insights**: Track usage, costs, and performance
+## What Works Today
+
+- Prompt creation, listing, search, and deletion
+- Version control (create versions, track history)
+- Variable extraction from `{{placeholder}}` syntax
+- User authentication via Clerk
+- Workspace-based data isolation
+- Dashboard with sidebar navigation
+
+## Roadmap
+
+- [ ] Prompt editor with variable highlighting
+- [ ] LLM Playground (multi-model testing)
+- [ ] Evaluation pipelines
+- [ ] Collections and organization
+- [ ] Analytics and usage tracking
+- [ ] Memory management
+- [ ] Public API
+- [ ] Billing / subscriptions
 
 ## Tech Stack
 
@@ -26,14 +40,14 @@ A comprehensive prompt management and LLMOps platform for teams.
 ### Prerequisites
 
 - Node.js 18+
-- Docker & Docker Compose (for local development)
+- Docker & Docker Compose (for local database)
 - A Clerk account
 
 ### Installation
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/yourusername/prompt-vault.git
+   git clone <your-repo-url>
    cd prompt-vault
    ```
 
@@ -47,12 +61,12 @@ A comprehensive prompt management and LLMOps platform for teams.
    cp .env.example .env.local
    ```
 
-4. Start the local services:
+4. Start the local database:
    ```bash
    docker-compose up -d
    ```
 
-5. Initialize the database:
+5. Push the database schema:
    ```bash
    npm run db:push
    ```
@@ -72,41 +86,12 @@ A comprehensive prompt management and LLMOps platform for teams.
 |---------|-------------|
 | `npm run dev` | Start development server |
 | `npm run build` | Build for production |
-| `npm run start` | Start production server |
 | `npm run lint` | Run ESLint |
-| `npm run format` | Format code with Prettier |
 | `npm run typecheck` | Run TypeScript type checking |
+| `npm run format` | Format code with Prettier |
 | `npm run db:generate` | Generate Prisma client |
 | `npm run db:push` | Push schema to database |
-| `npm run db:migrate` | Run database migrations |
 | `npm run db:studio` | Open Prisma Studio |
-
-### Project Structure
-
-```
-prompt-vault/
-├── app/                 # Next.js App Router
-├── components/          # React components
-├── server/              # Server-side code (tRPC, services)
-├── lib/                 # Utilities and helpers
-├── hooks/               # Custom React hooks
-├── store/               # Zustand stores
-├── types/               # TypeScript types
-├── config/              # Configuration
-├── prisma/              # Database schema and migrations
-└── docs/                # Documentation
-```
-
-## Documentation
-
-See the [docs](./docs) folder for detailed documentation:
-
-- [Implementation Strategy](./docs/IMPLEMENTATION_STRATEGY.md) - Full implementation plan
-- [Phase 1 Plan](./docs/PHASE_1_PROJECT_PLAN.md) - Foundation phase details
-
-## Contributing
-
-Contributions are welcome! Please read our contributing guidelines before submitting a PR.
 
 ## License
 
